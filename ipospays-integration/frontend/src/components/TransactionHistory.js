@@ -18,6 +18,35 @@ const TransactionHistory = () => {
     setLoading(false);
   };
 
+  const handleRefund = async (transactionId) => {
+    const amount = prompt('Enter refund amount:');
+    if (!amount || isNaN(amount)) {
+      alert('Please enter a valid amount.');
+      return;
+    }
+    try {
+      await axios.post(`/api/payments/refund/${transactionId}`, { amount });
+      alert('Refund successful!');
+      fetchTransactions();
+    } catch (err) {
+      alert('Refund failed.');
+      console.error(err.response.data);
+    }
+  };
+
+  const handleVoid = async (transactionId) => {
+    if (window.confirm('Are you sure you want to void this transaction?')) {
+      try {
+        await axios.post(`/api/payments/void/${transactionId}`);
+        alert('Void successful!');
+        fetchTransactions();
+      } catch (err) {
+        alert('Void failed.');
+        console.error(err.response.data);
+      }
+    }
+  };
+
   return (
     <div>
       <h2>Transaction History</h2>
@@ -50,6 +79,14 @@ const TransactionHistory = () => {
               <td>{transaction.status}</td>
               <td>{transaction.dejavooTransactionId}</td>
               <td>{new Date(transaction.createdAt).toLocaleString()}</td>
+              <td>
+                {transaction.status === 'success' && (
+                  <>
+                    <button onClick={() => handleRefund(transaction._id)}>Refund</button>
+                    <button onClick={() => handleVoid(transaction._id)}>Void</button>
+                  </>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
