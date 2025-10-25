@@ -7,8 +7,7 @@ router.post('/webhook', paymentController.handleWebhook);
 router.get('/history/:merchantId', paymentController.getTransactionHistory);
 router.post('/refund/:transactionId', paymentController.refundTransaction);
 router.post('/void/:transactionId', paymentController.voidTransaction);
-router.post('/validate-card', paymentController.validateCard);
-router.post('/pre-auth', paymentController.preAuth);
-router.post('/capture/:transactionId', paymentController.capture);
+router.post('/preauth', paymentController.preAuthPayment);
+router.post('/capture', paymentController.capturePayment);
 
 module.exports = router;

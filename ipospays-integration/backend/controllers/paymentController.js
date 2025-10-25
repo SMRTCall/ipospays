@@ -212,7 +212,7 @@ const voidTransaction = async (req, res) => {
       transactionRequest: {
         transactionType: 2, // 2 for VOID
         rrn: originalTransaction.rrn,
-        amount: originalTransaction.amount * 100, // The documentation says to include the amount for void
+        amount: originalTransaction.amount * 100,
       },
     };
 
@@ -237,171 +237,86 @@ const voidTransaction = async (req, res) => {
   }
 };
 
-const validateCard = async (req, res) => {
+const preAuthPayment = async (req, res) => {
+  const { merchantId, cardToken, amount } = req.body;
+
   try {
-    const { merchantId } = req.body;
-
-    const merchant = await Merchant.findOne({ merchantId });
+    const merchant = await Merchant.findById(merchantId);
     if (!merchant) {
-      return res.status(404).json({ error: 'Merchant not found' });
+      return res.status(404).json({ message: 'Merchant not found' });
     }
-
     const authToken = merchant.getAuthToken();
-    const transactionReferenceId = `validate_${Date.now()}`;
 
-    const newTransaction = new Transaction({
-      merchant: merchant._id,
-      transactionReferenceId,
-      amount: 0,
-    });
-    await newTransaction.save();
-
-    const dejavooApiUrl = 'https://payment.ipospays.tech/api/v1/external-payment-transaction';
-
-    const payload = {
+    const transactionData = {
       merchantAuthentication: {
         merchantId: merchant.tpn,
-        transactionReferenceId,
+        transactionReferenceId: `preauth_${Date.now()}`
       },
       transactionRequest: {
-        transactionType: 2, // 2 for CARD VALIDATION
-        amount: 0,
-      },
-      notificationOption: {
-        notifyByRedirect: true,
-        returnUrl: `${process.env.FRONTEND_URL}/card-validated`,
-        failureUrl: `${process.env.FRONTEND_URL}/card-validation-failed`,
-        cancelUrl: `${process.env.FRONTEND_URL}/card-validation-cancelled`,
-        postAPI: `${process.env.BACKEND_URL}/api/payments/webhook`,
+        transactionType: 5, // 5 = PreAuth
+        cardToken: cardToken,
+        amount: Math.round(amount * 100).toString()
       },
       preferences: {
-        integrationType: 1, // E-Commerce portal
-        requestCardToken: true,
-      },
+        requestCardToken: true
+      }
     };
 
-    const headers = {
-      'token': authToken,
-      'Content-Type': 'application/json',
-    };
+    const response = await axios.post('https://payment.ipospays.tech/api/v1/iposTransact', transactionData, {
+      headers: { 'token': authToken }
+    });
 
-    const response = await axios.post(dejavooApiUrl, payload, { headers });
-
-    if (response.data && response.data.information) {
-      res.json({ hppUrl: response.data.information });
-    } else {
-      res.status(500).json({ error: 'Failed to get HPP URL from Dejavoo', details: response.data });
+    if (response.data.iposTransactResponse && response.data.iposTransactResponse.responseCode === '200') {
+        const transaction = new Transaction({
+            merchant: merchantId,
+            amount: amount,
+            status: 'pre-authorized',
+            transactionReferenceId: transactionData.merchantAuthentication.transactionReferenceId,
+            rrn: response.data.iposTransactResponse.RRN,
+            cardToken: response.data.iposTransactResponse.chdToken || cardToken,
+        });
+        await transaction.save();
     }
+
+    res.status(200).json(response.data);
   } catch (error) {
-    console.error('Error validating card:', error.response ? error.response.data : error.message);
-    res.status(500).json({ error: 'An error occurred while validating the card.' });
+    res.status(500).json({ message: 'Error pre-authorizing payment', error: error.message });
   }
 };
 
-const preAuth = async (req, res) => {
-  try {
-    const { amount, cardToken, merchantId } = req.body;
+const capturePayment = async (req, res) => {
+  const { merchantId, rrn, amount } = req.body;
 
-    const merchant = await Merchant.findOne({ merchantId });
+  try {
+    const merchant = await Merchant.findById(merchantId);
     if (!merchant) {
-      return res.status(404).json({ error: 'Merchant not found' });
+      return res.status(404).json({ message: 'Merchant not found' });
     }
-
-    const authToken = merchant.getAuthToken();
-    const transactionReferenceId = `auth_${Date.now()}`;
-
-    const dejavooApiUrl = 'https://payment.ipospays.tech/api/v1/iposTransact';
-
-    const payload = {
-      merchantAuthentication: {
-        merchantId: merchant.tpn,
-        transactionReferenceId,
-      },
-      transactionRequest: {
-        transactionType: 5, // 5 for PRE-AUTH
-        amount: Math.round(amount * 100),
-        cardToken,
-      },
-    };
-
-    const headers = {
-      'token': authToken,
-      'Content-Type': 'application/json',
-    };
-
-    const response = await axios.post(dejavooApiUrl, payload, { headers });
-
-    if (response.data && response.data.iposTransactResponse && response.data.iposTransactResponse.responseCode === '200') {
-      const newTransaction = new Transaction({
-        merchant: merchant._id,
-        transactionReferenceId,
-        amount,
-        status: 'authorized',
-        dejavooTransactionId: response.data.iposTransactResponse.transactionId,
-        rrn: response.data.iposTransactResponse.RRN,
-        cardToken,
-      });
-      await newTransaction.save();
-
-      res.json({ message: 'Pre-authorization successful', data: response.data.iposTransactResponse });
-    } else {
-      res.status(500).json({ error: 'Pre-authorization failed', details: response.data });
-    }
-  } catch (error) {
-    console.error('Error in pre-auth:', error.response ? error.response.data : error.message);
-    res.status(500).json({ error: 'An error occurred during pre-authorization.' });
-  }
-};
-
-const capture = async (req, res) => {
-  try {
-    const { transactionId } = req.params;
-    const { amount } = req.body;
-
-    const originalTransaction = await Transaction.findById(transactionId).populate('merchant');
-    if (!originalTransaction) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-
-    if (originalTransaction.status !== 'authorized') {
-      return res.status(400).json({ error: 'Only authorized transactions can be captured' });
-    }
-
-    const merchant = originalTransaction.merchant;
     const authToken = merchant.getAuthToken();
 
-    const dejavooApiUrl = 'https://payment.ipospays.tech/api/v1/iposTransact';
-
-    const payload = {
+    const transactionData = {
       merchantAuthentication: {
         merchantId: merchant.tpn,
-        transactionReferenceId: `capture_${originalTransaction.transactionReferenceId}`,
+        transactionReferenceId: `capture_${Date.now()}`
       },
       transactionRequest: {
-        transactionType: 6, // 6 for TICKET (CAPTURE)
-        amount: Math.round((amount || originalTransaction.amount) * 100),
-        rrn: originalTransaction.rrn,
-      },
+        transactionType: 6, // 6 = Ticket (Capture)
+        rrn: rrn,
+        amount: Math.round(amount * 100).toString()
+      }
     };
 
-    const headers = {
-      'token': authToken,
-      'Content-Type': 'application/json',
-    };
+    const response = await axios.post('https://payment.ipospays.tech/api/v1/iposTransact', transactionData, {
+      headers: { 'token': authToken }
+    });
 
-    const response = await axios.post(dejavooApiUrl, payload, { headers });
-
-    if (response.data && response.data.iposTransactResponse && response.data.iposTransactResponse.responseCode === '200') {
-      originalTransaction.status = 'success';
-      await originalTransaction.save();
-
-      res.json({ message: 'Capture successful', data: response.data.iposTransactResponse });
-    } else {
-      res.status(500).json({ error: 'Capture failed', details: response.data });
+    if (response.data.iposTransactResponse && response.data.iposTransactResponse.responseCode === '200') {
+        await Transaction.findOneAndUpdate({ rrn: rrn, merchant: merchantId }, { status: 'captured' });
     }
+
+    res.status(200).json(response.data);
   } catch (error) {
-    console.error('Error capturing transaction:', error.response ? error.response.data : error.message);
-    res.status(500).json({ error: 'An error occurred while capturing the transaction.' });
+    res.status(500).json({ message: 'Error capturing payment', error: error.message });
   }
 };
 
@@ -411,7 +326,6 @@ module.exports = {
   getTransactionHistory,
   refundTransaction,
   voidTransaction,
-  validateCard,
-  preAuth,
-  capture,
+  preAuthPayment,
+  capturePayment,
 };
