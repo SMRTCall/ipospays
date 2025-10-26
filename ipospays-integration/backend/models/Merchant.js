@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const crypto = require('crypto-js');
+const { encrypt, decrypt } = require('../utils/encryption');
 
 const merchantSchema = new mongoose.Schema({
   name: {
@@ -26,14 +26,13 @@ merchantSchema.pre('save', function (next) {
   if (!this.isModified('authToken')) {
     return next();
   }
-  this.authToken = crypto.AES.encrypt(this.authToken, process.env.ENCRYPTION_KEY).toString();
+  this.authToken = encrypt(this.authToken);
   next();
 });
 
 // Method to decrypt the auth token
 merchantSchema.methods.getAuthToken = function () {
-  const bytes = crypto.AES.decrypt(this.authToken, process.env.ENCRYPTION_KEY);
-  return bytes.toString(crypto.enc.Utf8);
+  return decrypt(this.authToken);
 };
 
 const Merchant = mongoose.model('Merchant', merchantSchema);

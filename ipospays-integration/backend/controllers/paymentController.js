@@ -241,7 +241,7 @@ const preAuthPayment = async (req, res) => {
   const { merchantId, cardToken, amount } = req.body;
 
   try {
-    const merchant = await Merchant.findById(merchantId);
+    const merchant = await Merchant.findOne({ merchantId });
     if (!merchant) {
       return res.status(404).json({ message: 'Merchant not found' });
     }
@@ -268,7 +268,7 @@ const preAuthPayment = async (req, res) => {
 
     if (response.data.iposTransactResponse && response.data.iposTransactResponse.responseCode === '200') {
         const transaction = new Transaction({
-            merchant: merchantId,
+            merchant: merchant._id,
             amount: amount,
             status: 'pre-authorized',
             transactionReferenceId: transactionData.merchantAuthentication.transactionReferenceId,
@@ -288,7 +288,7 @@ const capturePayment = async (req, res) => {
   const { merchantId, rrn, amount } = req.body;
 
   try {
-    const merchant = await Merchant.findById(merchantId);
+    const merchant = await Merchant.findOne({ merchantId });
     if (!merchant) {
       return res.status(404).json({ message: 'Merchant not found' });
     }
@@ -311,7 +311,7 @@ const capturePayment = async (req, res) => {
     });
 
     if (response.data.iposTransactResponse && response.data.iposTransactResponse.responseCode === '200') {
-        await Transaction.findOneAndUpdate({ rrn: rrn, merchant: merchantId }, { status: 'captured' });
+        await Transaction.findOneAndUpdate({ rrn: rrn, merchant: merchant._id }, { status: 'captured' });
     }
 
     res.status(200).json(response.data);
