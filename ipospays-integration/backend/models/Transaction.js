@@ -17,7 +17,7 @@ const transactionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'success', 'failure', 'cancelled', 'refunded', 'voided', 'authorized'],
+    enum: ['pending', 'success', 'failure', 'cancelled', 'refunded', 'voided', 'authorized', 'pre-authorized', 'captured'],
     default: 'pending',
   },
   dejavooTransactionId: {
